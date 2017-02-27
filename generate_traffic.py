@@ -1,4 +1,9 @@
+#!/usr/bin/python
+
+import sys, getopt
 from scapy.all import *
+import os
+from multiprocessing import Process
 
 # Maintin  VM-ethinterface-IP mapping
 vm = {
@@ -17,6 +22,17 @@ vm = {
         }
     }
 }
+
+routers = [
+           { 'name': 'chicago', 'router_id': '10.210.10.124', 'latitude':'', 'longitude':''},
+           { 'name': 'san francisco', 'router_id': '10.210.10.100', 'latitude':'', 'longitude':''},
+           { 'name': 'dallas', 'router_id': '10.210.10.106', 'latitude':'', 'longitude':''},
+           { 'name': 'miami', 'router_id': '10.210.10.112', 'latitude':'', 'longitude':''},
+           { 'name': 'new york', 'router_id': '10.210.10.118', 'latitude':'', 'longitude':''},
+           { 'name': 'los angeles', 'router_id': '10.210.10.113', 'latitude':'', 'longitude':''},
+           { 'name': 'houston', 'router_id': '10.210.10.114', 'latitude':'', 'longitude':''},
+           { 'name': 'tampa', 'router_id': '10.210.10.115', 'latitude':'', 'longitude':''}
+           ]
 
 '''rtp_payload_types = {
     # http://www.iana.org/assignments/rtp-parameters
@@ -45,8 +61,19 @@ vm = {
     # Send VOIP Packets
     # Command: ./ITGRecv
 
+# Perform TFTP copy
+#def create_tftp_transfer(rtr_dst_ip):
+ 
+
+def create_http_packets(intf, rtr_dst_ip):
+    print 'Start of create_http_packets'
+    packet = IP(dst=rtr_dst_ip)/TCP()/"GET / HTTP/1.0\r\n\r\n"/Raw(RandString(size=900))
+    for packets in range(0, 10000):
+        send(packet, iface=intf)
+
+
 def create_icmp_packets(intf, rtr_dst):
-    # ans,unans=sr(IP(dst="192.168.1.1-254")/ICMP())
+    print 'Start of create_icmp_packets'
     icmp = ICMP()
     packet = IP(dst=rtr_dst)
     for packet_num in range(0, 10000):
@@ -59,6 +86,7 @@ def create_icmp_packets(intf, rtr_dst):
 
 def create_voip_packets(intf, rtr_src, rtr_dst, dscp=184, protocol='rtp'):
     # eth, IP, Src IP, Dst IP, Qos, Payload
+    print 'Start of create_voip_packets'
     if protocol == 'rtp':
         rtp = {
 	    "sequence": 1,
@@ -77,17 +105,61 @@ def create_voip_packets(intf, rtr_src, rtr_dst, dscp=184, protocol='rtp'):
     for i in range(0, 100000000):
         sendp(packet, iface=intf)
 
-# Main
-if __name__ == '__main__':
-    #rtr_src_ip = "192.168.1.2"
-    #rtr_dst_ip = "192.168.1.1"
-    #interface = ["eth1", "eth2", "eth3", "eth4"]
-    #interface = "eth1"
-    #dscp = 46
-    #rtp = 1
-    #for intf in interface:
-    
+# Main function
+def main(argv):
+    src_loc = ''
+    dst_loc = ''
+    try:
+        opts, args = getopt.getopt(argv, "hd:s", ["sloc=","dloc="])
+    except getopt.GetoptError:
+        print 'generate_traffic.py -s <traffic_source_location> -d <traffic_destination_location>'
+        sys.exit(2)
+    for opt, arg in opts:
+        if opt == '-h':
+            print 'generate_traffic.py -s <traffic_source_location> -d <traffic_destination_location>'
+            sys.exit()
+        elif opt in ("-s", "--sloc"):
+            src_loc = arg
+        elif opt in ("-d", "--dloc"):
+            dst_loc = arg
+    print 'Source Location for traffic generation is: ', src_loc
+    print 'Destination Location for traffic end is: ', dst_loc
 
+    # Create VoIP packets
+    interface = 'eth1'
+    rtr_src_ip = vm['id'][src_loc][interface]
+    rtr_dst_ip = vm['id'][dst_loc][interface]
+    process_id_1 = Process(target = create_voip_packets(interface, rtr_src_ip, rtr_dst_ip)) 
+    process_id_1.start()    
+    
+    # Create Scapy ICMP packets
+    interface = 'eth2' 
+    rtr_src_ip = vm['id'][src_loc][interface]
+    rtr_dst_ip = vm['id'][dst_loc][interface]        
+    process_id_2 = Process(target = create_icmp_packets(interface, rtr_dst_ip))
+    process_id_2.start()
+
+    # Create TFTP transfer of a file
+    #interface = 'eth3' 
+    #rtr_src_ip = vm['id'][src_loc][interface]
+    #rtr_dst_ip = vm['id'][dst_loc][interface]
+    #process_id_3 = Process(target = create_tftp_transfer(rtr_dst_ip))
+    #process_id_3.start()
+
+    # Create HTTP packets
+    interface = 'eth4' 
+    rtr_src_ip = vm['id'][src_loc][interface]
+    rtr_dst_ip = vm['id'][dst_loc][interface]
+    process_id_4 = Process(target=create_http_packets(interface, rtr_dst_ip))
+    process_id_4.start()    
+
+    # Join processes
+    process_id_1.join()
+    process_id_2.join()
+    #process_id_3.join()
+    process_id_4.join()
+    
+    '''
     # Create D-ITG VOIP Packets
     d_itg = None
     if not d_itg:
@@ -98,17 +170,7 @@ if __name__ == '__main__':
             codec = 'G.729.3'
             protocol = 'RTP'
             #d_itg_traffic(rtr_src_ip, rtr_dst_ip, codec, protocol)
+    '''
 
-
-    # Create Scapy VoIP packets
-    interface = 'eth2'
-    if interface == 'eth1':
-        rtr_src_ip = vm['id']['groupfive-west'][interface]
-        rtr_dst_ip = vm['id']['groupfive-east'][interface]
-        create_voip_packets(interface, rtr_src_ip, rtr_dst_ip)
-        # create_packets(interface, rtr_src_ip, rtr_dst_ip, dscp, rtp)
-    elif interface == 'eth2':
-        # Create Scapy ICMP packets
-        rtr_src_ip = vm['id']['groupfive-west'][interface]
-        rtr_dst_ip = vm['id']['groupfive-east'][interface]
-        create_icmp_packets(interface, rtr_dst_ip)
+if __name__ == "__main__":
+    main(sys.argv[1:])
